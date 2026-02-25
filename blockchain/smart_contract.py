@@ -3,44 +3,49 @@
 from typing import Dict, List, Optional
 from datetime import datetime
 from config.logging_config import get_logger
+from blockchain.ethereum_client import EthereumClient
 
 logger = get_logger(__name__)
 
 
 class SmartContract:
-    """Smart contract for FL governance and access control."""
+    """Smart contract wrapper for FL governance and access control via Ethereum."""
     
-    def __init__(self, min_clients: int = 2, min_data_quality: float = 0.6):
+    def __init__(self, eth_client: EthereumClient, contract_address: str, abi_path: str, admin_private_key: str):
         """
-        Initialize smart contract.
+        Initialize connection to deployed governance smart contract.
         
         Args:
-            min_clients: Minimum clients to aggregate
-            min_data_quality: Minimum data quality score
+            eth_client: EthereumClient instance
+            contract_address: Deployed address of MedChainGovernance
+            abi_path: Path to the ABI JSON
+            admin_private_key: Private key of the admin who deployed the contract
         """
-        self.min_clients = min_clients
-        self.min_data_quality = min_data_quality
+        self.eth = eth_client
+        self.contract = self.eth.load_contract(contract_address, abi_path)
+        self.admin_pk = admin_private_key
         
-        # Registered clients
-        self.clients: Dict[str, Dict] = {}
-        
-        # Access logs
+        # Access logs (kept off-chain for cheaper logging, could be moved on-chain if needed)
         self.access_log: List[Dict] = []
         
-        logger.info(f"Initialized smart contract (min_clients={min_clients})")
+        # Read initial params from blockchain
+        self.min_clients = self.eth.call_view_function(self.contract, 'minClients')
+        self.min_data_quality = self.eth.call_view_function(self.contract, 'minDataQuality') / 100.0
+        
+        logger.info(f"Initialized smart contract wrapper (min_clients={self.min_clients}) at {contract_address}")
     
     def register_client(
         self,
-        client_id: str,
+        client_address: str,
         organization: str,
         data_size: int,
         data_quality: float = 1.0
     ) -> bool:
         """
-        Register a new client.
+        Register a new client on the blockchain.
         
         Args:
-            client_id: Unique client identifier
+            client_address: Ethereum address of the client
             organization: Organization name
             data_size: Dataset size
             data_quality: Data quality score (0-1)
@@ -48,63 +53,62 @@ class SmartContract:
         Returns:
             True if registration successful
         """
-        if client_id in self.clients:
-            logger.warning(f"Client {client_id} already registered")
+        # Convert float quality strictly back to uint256 scaled format (e.g. 0.95 -> 95)
+        scaled_quality = int(data_quality * 100)
+        
+        try:
+            receipt = self.eth.send_transaction(
+                self.contract,
+                'registerClient',
+                self.admin_pk,
+                client_address,
+                organization,
+                data_size,
+                scaled_quality
+            )
+            logger.info(f"Registered client {client_address} ({organization}) in tx {receipt['transactionHash'].hex()}")
+            return True
+        except Exception as e:
+            logger.warning(f"Failed to register client {client_address}: {str(e)}")
             return False
-        
-        if data_quality < self.min_data_quality:
-            logger.warning(f"Client {client_id} data quality too low: {data_quality}")
-            return False
-        
-        self.clients[client_id] = {
-            "organization": organization,
-            "data_size": data_size,
-            "data_quality": data_quality,
-            "registered_at": datetime.now().isoformat(),
-            "active": True
-        }
-        
-        logger.info(f"Registered client {client_id} ({organization})")
-        return True
     
-    def deactivate_client(self, client_id: str) -> bool:
-        """Deactivate a client."""
-        if client_id not in self.clients:
+    def deactivate_client(self, client_address: str) -> bool:
+        """Deactivate a client on the blockchain."""
+        try:
+            receipt = self.eth.send_transaction(
+                self.contract,
+                'deactivateClient',
+                self.admin_pk,
+                client_address
+            )
+            logger.info(f"Deactivated client {client_address} in tx {receipt['transactionHash'].hex()}")
+            return True
+        except Exception as e:
+            logger.warning(f"Failed to deactivate client {client_address}: {str(e)}")
             return False
-        
-        self.clients[client_id]["active"] = False
-        logger.info(f"Deactivated client {client_id}")
-        return True
     
     def can_aggregate(self, participating_clients: List[str]) -> bool:
         """
-        Check if aggregation can proceed.
+        Check if aggregation can proceed via the smart contract constraint.
         
         Args:
-            participating_clients: List of client IDs
+            participating_clients: List of client Ethereum addresses
             
         Returns:
-            True if aggregation allowed
+            True if aggregation allowed by contract
         """
-        # Check minimum clients
-        if len(participating_clients) < self.min_clients:
-            logger.warning(f"Not enough clients: {len(participating_clients)} < {self.min_clients}")
+        try:
+            return self.eth.call_view_function(
+                self.contract,
+                'canAggregate',
+                participating_clients
+            )
+        except Exception as e:
+            logger.error(f"Error checking canAggregate: {str(e)}")
             return False
-        
-        # Check all clients are registered and active
-        for client_id in participating_clients:
-            if client_id not in self.clients:
-                logger.warning(f"Unregistered client: {client_id}")
-                return False
-            
-            if not self.clients[client_id]["active"]:
-                logger.warning(f"Inactive client: {client_id}")
-                return False
-        
-        return True
     
     def log_access(self, client_id: str, action: str, success: bool):
-        """Log client access."""
+        """Log client access (Off-chain for cheap auditing)."""
         self.access_log.append({
             "timestamp": datetime.now().isoformat(),
             "client_id": client_id,
@@ -112,14 +116,29 @@ class SmartContract:
             "success": success
         })
     
-    def get_client_info(self, client_id: str) -> Optional[Dict]:
-        """Get client information."""
-        return self.clients.get(client_id)
+    def get_client_info(self, client_address: str) -> Optional[Dict]:
+        """Get client information from the blockchain."""
+        try:
+            client_data = self.eth.call_view_function(self.contract, 'clients', client_address)
+            # Solidity struct returns a tuple based on the fields defined
+            if client_data[0] == "": # organization is empty if uninitialized
+                return None
+                
+            return {
+                "organization": client_data[0],
+                "data_size": client_data[1],
+                "data_quality": client_data[2] / 100.0,
+                "registered_at": client_data[3],
+                "active": client_data[4]
+            }
+        except Exception as e:
+            logger.error(f"Error fetching client info: {str(e)}")
+            return None
     
     def get_active_clients(self) -> List[str]:
-        """Get list of active clients."""
-        return [
-            client_id
-            for client_id, info in self.clients.items()
-            if info["active"]
-        ]
+        """Get list of active client addresses from blockchain."""
+        try:
+            return self.eth.call_view_function(self.contract, 'getActiveClients')
+        except Exception as e:
+            logger.error(f"Error fetching active clients: {str(e)}")
+            return []

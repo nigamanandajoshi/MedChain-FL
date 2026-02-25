@@ -47,12 +47,26 @@ pip install -e .
 python scripts/generate_demo_data.py
 ```
 
-### Run Local FL Simulation
+### 1. Setup Ethereum Blockchain (Local Devnet)
+Before running the simulation, start the local Hardhat node and deploy the Smart Contracts:
 ```bash
-python scripts/run_local_fl.py
+./start_blockchain.sh
+```
+*(Keep this terminal open)*
+
+### 2. Generate Demo Patient Data
+In a new terminal:
+```bash
+python generate_data_standalone.py
 ```
 
-### Run Azure FL Pipeline
+### 3. Run Ethereum-Backed FL Simulation
+Execute the full federated learning loop with smart contract governance and on-chain logging:
+```bash
+python run_fl_standalone.py
+```
+
+### (Optional) Run Azure FL Pipeline
 ```bash
 python scripts/run_azure_fl.py
 ```

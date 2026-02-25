@@ -92,6 +92,12 @@ config/azure_credentials.json
 blockchain_data/
 *.db
 *.sqlite
+# Hardhat build artifacts & dynamic config — never commit these
+blockchain_eth/artifacts/
+blockchain_eth/cache/
+blockchain_eth/ignition/deployments/
+contract_addresses.json
+
 
 # API
 api/*.db

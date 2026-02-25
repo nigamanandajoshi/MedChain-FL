@@ -1,107 +1,30 @@
-"""Blockchain ledger for model update tracking."""
+"""Blockchain ledger wrapper for model update tracking via Ethereum."""
 
-import hashlib
 import json
-from datetime import datetime
 from typing import List, Dict, Optional
 from config.logging_config import get_logger
+from blockchain.ethereum_client import EthereumClient
 
 logger = get_logger(__name__)
 
 
-class Block:
-    """A single block in the blockchain."""
-    
-    def __init__(
-        self,
-        index: int,
-        timestamp: str,
-        data: Dict,
-        previous_hash: str
-    ):
-        """
-        Initialize a block.
-        
-        Args:
-            index: Block index
-            timestamp: Block timestamp
-            data: Block data (model updates, metrics, etc.)
-            previous_hash: Hash of previous block
-        """
-        self.index = index
-        self.timestamp = timestamp
-        self.data = data
-        self.previous_hash = previous_hash
-        self.hash = self.calculate_hash()
-    
-    def calculate_hash(self) -> str:
-        """Calculate block hash."""
-        block_string = json.dumps({
-            "index": self.index,
-            "timestamp": self.timestamp,
-            "data": self.data,
-            "previous_hash": self.previous_hash
-        }, sort_keys=True)
-        
-        return hashlib.sha256(block_string.encode()).hexdigest()
-    
-    def to_dict(self) -> Dict:
-        """Convert block to dictionary."""
-        return {
-            "index": self.index,
-            "timestamp": self.timestamp,
-            "data": self.data,
-            "previous_hash": self.previous_hash,
-            "hash": self.hash
-        }
-
-
 class BlockchainLedger:
-    """Blockchain ledger for federated learning."""
+    """Blockchain ledger wrapper for federated learning on Ethereum."""
     
-    def __init__(self):
-        """Initialize blockchain with genesis block."""
-        self.chain: List[Block] = []
-        self.create_genesis_block()
-        logger.info("Initialized blockchain ledger")
-    
-    def create_genesis_block(self):
-        """Create the first block in the chain."""
-        genesis_block = Block(
-            index=0,
-            timestamp=datetime.now().isoformat(),
-            data={"message": "Genesis Block - MedChain-FL"},
-            previous_hash="0"
-        )
-        self.chain.append(genesis_block)
-    
-    def get_latest_block(self) -> Block:
-        """Get the latest block."""
-        return self.chain[-1]
-    
-    def add_block(self, data: Dict) -> Block:
+    def __init__(self, eth_client: EthereumClient, contract_address: str, abi_path: str, admin_private_key: str):
         """
-        Add a new block to the chain.
+        Initialize connection to deployed ledger smart contract.
         
         Args:
-            data: Block data
-            
-        Returns:
-            New block
+            eth_client: EthereumClient instance
+            contract_address: Deployed address of MedChainLedger
+            abi_path: Path to the ABI JSON
+            admin_private_key: Private key of the admin who deployed the contract
         """
-        latest_block = self.get_latest_block()
-        
-        new_block = Block(
-            index=len(self.chain),
-            timestamp=datetime.now().isoformat(),
-            data=data,
-            previous_hash=latest_block.hash
-        )
-        
-        self.chain.append(new_block)
-        logger.info(f"Added block #{new_block.index} to blockchain")
-        
-        return new_block
+        self.eth = eth_client
+        self.contract = self.eth.load_contract(contract_address, abi_path)
+        self.admin_pk = admin_private_key
+        logger.info(f"Initialized smart contract ledger at {contract_address}")
     
     def record_fl_round(
         self,
@@ -109,9 +32,9 @@ class BlockchainLedger:
         num_clients: int,
         global_metrics: Dict,
         model_hash: Optional[str] = None
-    ) -> Block:
+    ) -> bool:
         """
-        Record a federated learning round.
+        Record a federated learning round on the blockchain.
         
         Args:
             round_number: FL round number
@@ -120,101 +43,100 @@ class BlockchainLedger:
             model_hash: Hash of global model weights
             
         Returns:
-            New block
+            True if recorded successfully
         """
-        data = {
-            "type": "fl_round",
-            "round": round_number,
-            "num_clients": num_clients,
-            "metrics": global_metrics,
-            "model_hash": model_hash
-        }
+        metrics_json = json.dumps(global_metrics)
+        model_hash_str = model_hash if model_hash else ""
         
-        return self.add_block(data)
+        try:
+            receipt = self.eth.send_transaction(
+                self.contract,
+                'recordFLRound',
+                self.admin_pk,
+                round_number,
+                num_clients,
+                metrics_json,
+                model_hash_str
+            )
+            logger.info(f"Recorded FL round {round_number} on-chain in tx {receipt['transactionHash'].hex()}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to record FL round {round_number}: {str(e)}")
+            return False
     
     def record_client_update(
         self,
         round_number: int,
-        client_id: str,
+        client_private_key: str,
         data_size: int,
         metrics: Dict
-    ) -> Block:
+    ) -> bool:
         """
-        Record a client update.
+        Record a client update. Client signs this transaction themselves.
         
         Args:
             round_number: FL round number
-            client_id: Client identifier
+            client_private_key: The Ethereum private key of the client sending the update
             data_size: Client dataset size
             metrics: Client metrics
             
         Returns:
-            New block
+            True if successful
         """
-        data = {
-            "type": "client_update",
-            "round": round_number,
-            "client_id": client_id,
-            "data_size": data_size,
-            "metrics": metrics
-        }
+        metrics_json = json.dumps(metrics)
         
-        return self.add_block(data)
-    
-    def is_valid(self) -> bool:
-        """
-        Validate the blockchain.
-        
-        Returns:
-            True if blockchain is valid
-        """
-        for i in range(1, len(self.chain)):
-            current_block = self.chain[i]
-            previous_block = self.chain[i - 1]
-            
-            # Check hash
-            if current_block.hash != current_block.calculate_hash():
-                logger.error(f"Invalid hash at block {i}")
-                return False
-            
-            # Check previous hash
-            if current_block.previous_hash != previous_block.hash:
-                logger.error(f"Invalid previous hash at block {i}")
-                return False
-        
-        return True
-    
-    def get_chain(self) -> List[Dict]:
-        """Get the entire chain as list of dicts."""
-        return [block.to_dict() for block in self.chain]
-    
-    def get_fl_rounds(self) -> List[Dict]:
-        """Get all FL round records."""
-        return [
-            block.to_dict()
-            for block in self.chain
-            if block.data.get("type") == "fl_round"
-        ]
-    
-    def save_to_file(self, filepath: str):
-        """Save blockchain to JSON file."""
-        with open(filepath, 'w') as f:
-            json.dump(self.get_chain(), f, indent=2)
-        logger.info(f"Saved blockchain to {filepath}")
-    
-    def load_from_file(self, filepath: str):
-        """Load blockchain from JSON file."""
-        with open(filepath, 'r') as f:
-            chain_data = json.load(f)
-        
-        self.chain = []
-        for block_data in chain_data:
-            block = Block(
-                index=block_data["index"],
-                timestamp=block_data["timestamp"],
-                data=block_data["data"],
-                previous_hash=block_data["previous_hash"]
+        try:
+            receipt = self.eth.send_transaction(
+                self.contract,
+                'recordClientUpdate',
+                client_private_key,
+                round_number,
+                data_size,
+                metrics_json
             )
-            self.chain.append(block)
-        
-        logger.info(f"Loaded blockchain from {filepath} ({len(self.chain)} blocks)")
+            logger.info(f"Client recorded update for round {round_number} in tx {receipt['transactionHash'].hex()}")
+            return True
+        except Exception as e:
+            logger.error(f"Client failed to record update: {str(e)}")
+            return False
+            
+    def get_fl_rounds(self) -> List[Dict]:
+        """Get all FL round records from blockchain.
+        This iterates from 1 to latestRound property on the contract.
+        """
+        rounds = []
+        try:
+            latest_round = self.eth.call_view_function(self.contract, 'latestRound')
+            for i in range(1, latest_round + 1):
+                round_data = self.eth.call_view_function(self.contract, 'flRounds', i)
+                # Ensure the round exists (struct uninitialized value check)
+                if round_data[0] != 0: 
+                    rounds.append({
+                        "round": round_data[0],
+                        "num_clients": round_data[1],
+                        "metrics": json.loads(round_data[2]) if round_data[2] else {},
+                        "model_hash": round_data[3],
+                        "timestamp": round_data[4]
+                    })
+        except Exception as e:
+            logger.error(f"Failed to fetch FL rounds: {str(e)}")
+            
+        return rounds
+
+    def get_client_updates(self, round_number: int) -> List[Dict]:
+        """Get client updates for a specific round."""
+        updates = []
+        try:
+            updates_data = self.eth.call_view_function(self.contract, 'getClientUpdates', round_number)
+            for update in updates_data:
+                updates.append({
+                    "client_address": update[0],
+                    "round": update[1],
+                    "data_size": update[2],
+                    "metrics": json.loads(update[3]) if update[3] else {},
+                    "timestamp": update[4]
+                })
+        except Exception as e:
+            logger.error(f"Failed to fetch client updates for round {round_number}: {str(e)}")
+            
+        return updates
