@@ -37,6 +37,15 @@ Node A (Hospital A)     Node B (Hospital B)     Node C (Research Lab)
 
 `Python · PyTorch · Distributed Systems · gRPC / sockets`
 
+## Repository structure
+```
+MedChain-FL/
+├── aggregator.py     # Central coordinator — FedAvg logic
+├── client.py         # Node — local training + gradient sending
+├── model.py          # Shared model architecture
+├── data/             # Sample data for each simulated node
+└── requirements.txt
+```
 ## Getting started
 
 ```bash
