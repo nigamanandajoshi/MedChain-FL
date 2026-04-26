@@ -1,3 +1,6 @@
+![Python](https://img.shields.io/badge/python-3.8+-blue)
+![PyTorch](https://img.shields.io/badge/PyTorch-2.0+-orange)
+![License](https://img.shields.io/badge/license-MIT-green)
 # MedChain-FL — Privacy-Preserving Federated Learning for Medical Data
 
 A distributed machine learning system that enables **collaborative model training across isolated medical institutions** without any raw patient data ever leaving its source node.
