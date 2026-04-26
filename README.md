@@ -87,3 +87,12 @@ rounds even under partial node failure.
 ## Author
 
 **Nigamananda Joshi** — [nigamanandajoshi@gmail.com](mailto:nigamanandajoshi@gmail.com) · [LinkedIn](https://linkedin.com/in/nigamananda)
+
+## License
+MIT License
+
+## Citation
+If you use this project in your research:
+Nigamananda Joshi. MedChain-FL: Privacy-Preserving
+Federated Learning for Medical Data (2024).
+github.com/nigamanandajoshi/MedChain-FL
