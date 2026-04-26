@@ -51,16 +51,26 @@ python client.py --node-id 1 --data-path data/hospital_b/
 
 ## Results
 
-| Metric | Centralized (baseline) | MedChain-FL |
-|--------|----------------------|-------------|
-| Model accuracy | 91.2% | 89.4% |
-| Privacy preserved | No | Yes |
-| Data never shared | No | Yes |
-| Fault tolerant | N/A | Yes (up to 30% node failure) |
-
+Benchmarking in progress. The system demonstrates that 
+federated training completes successfully across distributed 
+nodes with fault-tolerant aggregation. Formal accuracy 
+benchmarks against centralized baselines coming soon.
 ## Research context
 
-This project demonstrates that federated learning can achieve accuracy within ~2% of centralized training while providing strong privacy guarantees — a well-established result in the FL literature (McMahan et al., 2017) which this project implements from scratch for the medical domain.
+This project implements the Federated Averaging (FedAvg) 
+algorithm (McMahan et al., 2017) from scratch for the medical 
+domain. FL has been shown in literature to achieve accuracy 
+within 1–3% of centralized training while providing strong 
+privacy guarantees — demonstrating that collaborative ML is 
+possible without centralising sensitive data.
+
+This project demonstrates that architecture in a fault-tolerant 
+distributed setting, where the aggregator continues training 
+rounds even under partial node failure.
+
+> McMahan, B., Moore, E., Ramage, D., Hampson, S., & Agüera y Arcas, B. (2017).
+> Communication-Efficient Learning of Deep Networks from Decentralized Data.
+> *AISTATS 2017.* https://arxiv.org/abs/1602.05629
 
 ## Author
 
